@@ -1,0 +1,246 @@
+---
+title: "Project 05: Pairwise Alignments"
+author: Tiang Feng, Jacqueline Caldwell, Little Butler
+date: "`r format(Sys.time(), '%Y%m%d')`"
+output:
+  github_document:
+    html_preview: false
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE)
+library('reticulate')
+```
+
+```{python}
+# Global variables used to refer to the directions for Tmatrix.
+#
+END = 0 # stop trace
+
+DIAG = 1 # represents diagonal direction (i-1,j-1) 
+UP = 2 # represents up direction (i-1,j)
+LEFT = 3 # represents left direction (i,j-1)
+# where (i,j) represents comparison we are making.
+
+import numpy as np
+```
+
+
+```{python}
+def cal_score (matrix, seq1,seq2,i,j): 
+  ''' Calculate score for position (i,j) in scoring matrix,
+      also record move to trace back, and return this to the calling 
+      function.  Seq1 and seq2 are the strings being compared. (i,j) is 
+      the entry into the scoring matrix that needs to be filled.  Of note,
+      i is one MORE THAN the index into the seq1 string, and j is one 
+      MORE THAN the index into the seq2 string.  (The sequences are zero
+      based, and the matrices are using 1 based indexes (the 0 values of
+      the matrices are filled with zeros so the algorithm completes)
+      
+    Args:
+      matrix (numpy array): scoring matrix
+      seq1(str):  Sequence 1
+      seq2(srt):  Sequence 2
+      i (int): Column number into scoring matrix.
+      j (int): Row number into scoring matrix.
+      
+    Output:
+      score (int) set to the score for the score matrix at (i,j)
+      trace (int) set to the direction the score came from (for the 
+      transfer matrix)
+  '''
+  
+  diagonal = matrix[i-1][j-1] # H(i-1,j-1)
+  up = matrix[i][j-1]         # H(i,j-1)
+  left = matrix[i-1][j]       # H(i-1,j)
+  
+  if (seq1[i-1] == seq2[j-1]): # indexes are off from matrix indices by ONE!
+    # the base pairs match! update score info
+      diag_score = diagonal + match
+      up_score = up + gap
+      left_score = left + gap
+  else:
+    #base pairs do not match! update score info
+      diag_score = diagonal + mismatch
+      up_score = up + gap
+      left_score = left + gap
+
+  score = max(diag_score, up_score, left_score,0) # find max value
+  
+  if (score == diag_score):
+    trace = DIAG            # assign directionality for score
+  elif (score == up_score): 
+    trace = UP
+  elif (score == left_score): 
+    trace = LEFT
+  else: 
+    trace=END
+
+  return(score,trace) # to change in matrices by calling function.
+    
+```
+
+```{python}
+def traceback (seq1, seq2, matrix, Tmatrix, maximum_position):
+  '''Function takes a score matrix and direction matrix from a 
+     Smith-Waterman algorithm, and creates a traceback alignment path
+     for the maximal alignment of the two sequences seq1 and se2.
+     Because the path would be reversed as the lookup is done
+     backwards, the strings are reversed before they are returned 
+     to the user.
+     
+  Args:
+    seq1 (str): sequence1
+    seq2 (str): sequence2
+    matrix (numpy array): scoring matrix for our sequences (smith-waterman)
+    Tmatrix (numpy array): direction/trace matrix for our sequences
+    maximum_position (tuple): (i,j) of the maximal score in our score
+                              matrix
+  
+  Output:
+    align1 (str): maximal alignment string for seq1
+    align2 (str): maximal alignment string for seq2
+    
+  '''
+  
+  current_col, current_row = maximum_position
+  align_seq1 = ""
+  align_seq2 = ""
+  
+  # start from the maximum position
+  current_score = matrix[current_col][current_row]
+  current_direction = Tmatrix[current_col][current_row]
+
+  while current_score != END:
+    if current_direction == DIAG:
+      align_seq1 += seq1[current_col-1] # adding one char to the align seq
+      align_seq2 += seq2[current_row-1] # ditto
+      current_row = current_row-1 # both col and row need to change!
+      current_col = current_col-1
+                
+    elif current_direction == UP:
+      align_seq1 += "-" # put space into seq1
+      align_seq2 += seq2[current_row-1] # put char into seq2
+      current_row = current_row-1
+      #current_col remains the same!
+              
+    elif current_direction == LEFT:
+      align_seq1 += seq1[current_col-1] # put char into seq1
+      align_seq2 += "-" # put space into seq2
+      current_col = current_col-1
+      # current row remains the same!
+    current_score = matrix[current_col][current_row] #update cur_score
+    current_direction = Tmatrix[current_col][current_row] #update dir
+  # end while loop
+  
+  # Last step is to reverse the max alignment strings and return them
+  # need to be reversed because the trace is backwards
+    rev_align_seq1="".join(reversed(align_seq1))
+    rev_align_seq2="".join(reversed(align_seq2))
+        
+  return (rev_align_seq1,rev_align_seq2)
+
+```
+
+```{python}
+def smith_waterman(seq1, seq2, match=1, mismatch=-1, gap=-1):
+  ''' Smith-Waterman algorithm for maximal local alignment of sequences
+  
+    Args:
+      seq1 (str): sequence1
+      seq2 (str): sequence2
+      match: match 
+      mismatch: penalty of a mismatch between sequences
+      gap: penalty for a gap that is needed in a sequence to make 
+      the two align
+      
+    Returns:
+      aligned_seq1(str): segment of seq1 that optimally matches seq2
+      aligned_seq2(str): segment of seq2 that optimally matches seq1
+      score_matrix(numpy array): scoring matrix created by algorithm
+  '''
+  final_score = 0
+  final_score_pos = [0,0]
+    
+  n = len(seq1)+1  # need an extra column and row for 0s 
+  m = len(seq2)+1
+    
+  # initialize our matrices, which ware the size of our sequences+1
+  matrix = np.zeros((n,m),dtype=int) 
+  Tmatrix = np.zeros((n,m),dtype=int) 
+
+  # fill the Score matrix and Trace matrix with scores and directions
+  for i in range(1,n):
+    for j in range(1,m):
+      new_score, trace=cal_score(matrix,seq1,seq2,i,j)
+      matrix[i][j] = new_score
+      Tmatrix[i][j] = trace
+      # check for max score
+      if (final_score < new_score): 
+        final_score = new_score # maximal score
+        final_score_pos = [i, j] # position of maximal score
+    #end for j loop
+  #end for i loop
+    
+  # Find the alignment sequences
+  align_seq1,align_seq2 = traceback(seq1,seq2,matrix,Tmatrix,final_score_pos)
+               
+  return(matrix, align_seq1, align_seq2)
+```
+
+```{python, eval=FALSE}
+# For testing code
+seq1 = 'TACTTAG'
+seq2 = 'CACATTAA'
+matrix, align1, align2 = smith_waterman(seq1, seq2)
+print(f"Calculate alignment for {seq1} and {seq2}:")
+print(align1)
+print(align2)
+print("Matrix:")
+matrix[:][:]
+print()
+
+seq3 = 'GATTACAGATTACA'
+seq4 = 'ACGATTACAGATTACAGATTACAGATTAC'
+matrix2, align3, align4 = smith_waterman(seq3,seq4)
+print(f"Calculate alignment for {seq3} and {seq4}:")
+print(align3)
+print(align4)
+print()
+#print("Matrix:")
+#matrix2[:][:]
+
+seq5 = 'AAAATTTT'
+seq6 = 'ACGCGCGGTTAAAATTCGCGT'
+matrix3, align5, align6 = smith_waterman(seq5,seq6)
+print(f"Calculate alignment for {seq5} and {seq6}")
+print(align5)
+print(align6)
+print()
+#print("Matrix:")
+#matrix3[:][:]
+
+seq7 = 'AAAAAA'
+seq8 = 'ACGAATTAA'
+matrix4, align7, align8 = smith_waterman(seq7,seq8)
+print(f"Calculate alignment for {seq7} and {seq8}")
+print(align7)
+print(align8)
+print()
+```
+
+Expected output:
+
+AC-TTA
+ACATTA
+[[0 0 0 0 0 0 0 0 0]
+ [0 0 0 0 0 1 1 0 0]
+ [0 0 1 0 1 0 0 2 1]
+ [0 1 0 2 1 0 0 1 1]
+ [0 0 0 1 1 2 1 0 0]
+ [0 0 0 0 0 2 3 2 1]
+ [0 0 1 0 1 1 2 4 3]
+ [0 0 0 0 0 0 1 3 3]]
+
